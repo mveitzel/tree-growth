@@ -1,0 +1,154 @@
+############################################################
+#	WhiteFirBUGSModel.txt
+#
+# BUGS model code for full model. This file contains the model
+# specification for BUGS.
+#
+# Melissa V Eitzel, University of California, Berkeley
+# (corresponding author: mveitzel@gmail.com)
+# John Battles, University of California, Berkeley
+# Jonas Knape, University of California, Berkeley
+# Robert York, University of California, Berkeley, UC Center for Forestry
+# Perry de Valpine, University of California, Berkeley
+#
+############################################################
+
+
+#---Full Model Specification---#
+##Data file will have to specify number of trees, years, compartments, soils, and plots; start and end years for each tree, number of observed sizes for each tree, and a matrix containing for each tree all the observations and a complementary matrix showing which years those observations occur for.
+##year, Plotnum, Compnum, treenum, and size will all need to be data.  Plotnum, Compnum, Treenum all need to be as.numeric of factors; year should be subtracted to start at year 1 for easy looping.
+## insolation, slope, elevation, soil (categorical) are all plot-level data
+## annual deficit is year-level data
+## basal area is year- and plot-level data
+
+Full.model<-function(){
+###------------------------------------------------------------------------------------------------
+	##Functional form (and timeseries/state-observation relationships)
+###------------------------------------------------------------------------------------------------
+	for(treenum in 1:n.trees) {
+		###------------------------------------------------------------------------------------##
+		## process model, with predictors (including size at previous time)
+		###------------------------------------------------------------------------------------##
+		for(yr in (start.year[treenum]+1):end.year[treenum]){
+			#here is where we could use a different functional form for the relationship with size
+			#and have a lot more covariates
+			size.predicted[treenum,yr]<- intercept[treenum,yr]+ 
+				size.slope[treenum,yr]*size[treenum,yr-1]+ 		##nearest .1 inch
+				s.slope*slope[plotnum[treenum]]+			##measured to nearest 1 percent
+				soil.mean[soil.type[plotnum[treenum]]]+
+				s.ba*ba[plotnum[treenum],yr]+
+				s.anndef*anndef[yr] +
+				s.insol*insol[plotnum[treenum]]+
+				s.elev*elev[plotnum[treenum]] +  		##measured to nearest 10' from map
+				int.insol.anndef*insol[plotnum[treenum]]*anndef[yr]+
+				int.size.ba*size[treenum,yr-1]*ba[plotnum[treenum],yr]+
+				int.size.elev*size[treenum,yr-1]*elev[plotnum[treenum]] + 
+				int.size.insol*size[treenum,yr-1]*insol[plotnum[treenum]]+
+				int.size.anndef*size[treenum,yr-1]*anndef[yr] +
+				int.size.slope*size[treenum,yr-1]*slope[plotnum[treenum]] +
+				int.size.soil[soil.type[plotnum[treenum]]]*size[treenum,yr-1]
+
+
+			#timeseries link and predictors + residual error
+			size[treenum,yr] ~ dnorm(size.predicted[treenum,yr],res.prec)
+		}
+		###------------------------------------------------------------##
+		## Observation model (with complicated indexing)
+		###------------------------------------------------------------##
+		##year and observation are ntree by maxobs in size; 
+		##NAs where the tree has less than maxobs observations
+		##year contains the year of the observation, observation contains the sizes.
+		for(obs in 1:nobs[treenum]){
+			observation[treenum,obs]~dnorm(size[treenum,year[treenum,obs]],obs.prec)
+		}
+		###----------------------------------------------------------------------------#
+		## Initial values in state-space model need special treatment
+		###----------------------------------------------------------------------------
+		size[treenum,start.year[treenum]]~dnorm(0,1.0E-6)
+	}
+
+###------------------------------------------------------------##
+	##Random effects for intercept and slope
+###----------------------------------------------------------------##
+	#Tree random effect 
+	for(treenum in 1:n.trees) {
+		i.tree[treenum] ~ dnorm(0,i.tree.prec)
+		s.tree[treenum] ~ dnorm(0,s.tree.prec)
+	
+		for(yr in 1:n.years) { 
+			intercept[treenum,yr] <- i.overall+i.tree[treenum] + i.plot[plotnum[treenum]]+ i.comp[compnum [treenum]]+ i.year[yr]
+			size.slope[treenum,yr] <- s.size+s.tree[treenum] + s.plot[plotnum[treenum]]+ s.comp[compnum [treenum]]+ s.year[yr]
+		}
+	}
+	#Plot random effects
+	for (j in 1:n.plots) {
+		i.plot[j] ~dnorm(0,i.plot.prec)
+		s.plot[j] ~dnorm(0,s.plot.prec)
+	}
+	#Compartment random effects
+	for (k in 1:n.comps){
+		i.comp[k] ~ dnorm(0,i.comp.prec)
+		s.comp[k] ~ dnorm(0,s.comp.prec)
+	}
+	#Year random effects
+	for(yr in 1:n.years) {
+		i.year[yr] ~dnorm(0,i.year.prec)
+		s.year[yr] ~dnorm(0,s.year.prec)
+	}
+
+###----------------------------##
+	##Priors
+###----------------------------##
+	#means (uniform priors for covariates & interactions with size)
+	i.overall ~dnorm(0, 1.0E-6)
+
+	s.size ~ dnorm(0, 1.0E-6)
+	s.slope ~ dnorm(0, 1.0E-6)
+	s.ba ~ dnorm(0, 1.0E-6)
+	s.elev ~ dnorm(0, 1.0E-6)
+	s.insol ~ dnorm(0, 1.0E-6)
+	s.anndef ~ dnorm(0, 1.0E-6)
+
+	int.size.insol ~ dnorm(0, 1.0E-6)
+	int.size.anndef ~ dnorm(0, 1.0E-6)
+	int.size.elev ~ dnorm(0, 1.0E-6)
+	int.size.slope ~ dnorm(0, 1.0E-6)
+	int.size.ba~dnorm(0, 1.0E-6)
+	int.insol.anndef~dnorm(0, 1.0E-6)
+
+	#Note: soils are parameterized here with Cohassett, the first alphabetically, as the reference soil; i.overall and s.size are actually estimating the intercept and slope for Cohassett.  The nodes soil.mean and int.size.soil will give the amount that each of the other soils is different from Cohassett as a reference.
+	soil.mean[1] <-0 # set this to zero, because this is Cohassett
+	int.size.soil[1]<-0 # set this to zero, because this is Cohassett
+	for(ind in 2:n.soils){
+			soil.mean[ind] ~ dnorm(0, 1.0E-6) # the effect of each of the other soils on intercept
+			int.size.soil[ind] ~ dnorm(0, 1.0E-6) # the effect of each of the other soils on slope
+
+	}
+
+
+	#precisions calculated from sds (for actually calculating random effects)
+	i.year.prec<- pow(i.year.sd,-2)
+	i.plot.prec<- pow(i.plot.sd,-2)
+	i.comp.prec<- pow(i.comp.sd,-2)
+	i.tree.prec<- pow(i.tree.sd,-2)
+	s.year.prec<- pow(s.year.sd,-2)
+	s.plot.prec<- pow(s.plot.sd,-2)
+	s.comp.prec<- pow(s.comp.sd,-2)
+	s.tree.prec<- pow(s.tree.sd,-2)
+	res.prec<- pow(res.sd,-2)
+
+	#Standard deviations (uniform priors)
+	i.year.sd ~ dunif(0, 100)
+	i.plot.sd ~ dunif(0, 100)
+	i.comp.sd ~ dunif(0, 100)
+	i.tree.sd ~ dunif(0, 100)
+	s.year.sd ~ dunif(0, 100)
+	s.plot.sd ~ dunif(0, 100)
+	s.comp.sd ~ dunif(0, 100)
+	s.tree.sd ~ dunif(0, 100)
+	res.sd ~ dunif(0, 100)
+
+	# nonzero cutoff, based on error in diameter tape
+	obs.prec <-pow(obs.sd,-2)
+	obs.sd ~ dunif(0.003566014, 100)
+}
